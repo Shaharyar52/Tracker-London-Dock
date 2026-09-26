@@ -140,7 +140,7 @@ document.getElementById("export").onclick=async()=>{
        const col=META.colmap[n]; if(!col) continue;
        const addr=colToLetters(col)+row;
        const value=st.dates&&st.dates[n]?dateToSerial(st.dates[n]):null;
-       sheetXml=patchCell(sheetXml,addr,49,value);
+       sheetXml=patchCell(sheetXml,addr,6,value);
      }
      for(const n of applianceNames){
        if(!(st.received&&st.received[n])) continue;
