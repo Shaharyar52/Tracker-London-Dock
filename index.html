@@ -118,49 +118,50 @@ document.getElementById("export").onclick=async()=>{
    const zip=await JSZip.loadAsync(bytes);
    let sheetXml=await zip.file("xl/worksheets/sheet1.xml").async("string");
 
-   // IMPORTANT: do not change styles.xml. The original workbook already has
-   // the green appliance style (style 19). Keeping the workbook's styles,
-   // tables and relationships untouched avoids Excel repair errors.
+   // MASTER SCHEDULE is the workbook's first worksheet (sheet1.xml).
+   // Preserve the workbook's existing styles. Date cells use the workbook's
+   // existing date style (49), and received appliances use the workbook's
+   // existing green style (19). No styles.xml changes are made.
+   function patchCell(xml, addr, style, value){
+     const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+     const cellRe=new RegExp(`<c\\s+r=["']${addr}["'][^>]*>.*?</c>|<c\\s+r=["']${addr}["'][^>]*/>`);
+     const body=value===null?`<c r="${addr}" s="${style}"/>`:`<c r="${addr}" s="${style}"><v>${esc(value)}</v></c>`;
+     if(cellRe.test(xml)) return xml.replace(cellRe,body);
+     const m=addr.match(/^(.*?)(\d+)$/); if(!m) return xml;
+     const rowNum=m[2];
+     const rowRe=new RegExp(`<row\\s+r=["']${rowNum}["'][^>]*>[\\s\\S]*?</row>`);
+     return xml.replace(rowRe,row=>row.replace('</row>',body+'</row>'));
+   }
+
    for(const item of META.plots){
-     const s=state[item.plot];if(!s)continue;
+     const st=state[item.plot]; if(!st) continue;
      const row=item.row;
-
      for(const n of stageNames){
-       const col=META.colmap[n];const addr=colToLetters(col)+row;
-       const cellRe=new RegExp(`<c r="${addr}"[^>]*>([\\s\\S]*?)</c>|<c r="${addr}"[^>]*/>`);
-       let newCell;
-       if(s.dates&&s.dates[n]){
-         newCell=`<c r="${addr}" s="6"><v>${dateToSerial(s.dates[n])}</v></c>`;
-       }else{
-         newCell=`<c r="${addr}" s="6"/>`;
-       }
-       if(cellRe.test(sheetXml)) sheetXml=sheetXml.replace(cellRe,newCell);
+       const col=META.colmap[n]; if(!col) continue;
+       const addr=colToLetters(col)+row;
+       const value=st.dates&&st.dates[n]?dateToSerial(st.dates[n]):null;
+       sheetXml=patchCell(sheetXml,addr,49,value);
      }
-
      for(const n of applianceNames){
-       if(!(s.received&&s.received[n]))continue;
-       const col=META.colmap[n];const addr=colToLetters(col)+row;
-       const cellRe=new RegExp(`<c r="${addr}"[^>]*(?:/>|>[\\s\\S]*?</c>)`);
-       const match=sheetXml.match(cellRe);
-       if(match){
-         const cell=match[0];
-         // Replace an existing style attribute instead of adding a second one.
-         // Duplicate XML attributes are invalid and cause Excel's repair dialog.
-         const greenCell=cell
-           .replace(/\s+s="[^"]*"/, "")
-           .replace(new RegExp(`<c r="${addr}"`),`<c r="${addr}" s="19"`);
-         sheetXml=sheetXml.replace(cellRe,greenCell);
-       }
+       if(!(st.received&&st.received[n])) continue;
+       const col=META.colmap[n]; if(!col) continue;
+       const addr=colToLetters(col)+row;
+       // Keep the appliance text/value exactly as it is; only change its style.
+       const cellRe=new RegExp(`<c\\s+r=["']${addr}["'][^>]*>`);
+       sheetXml=sheetXml.replace(cellRe,match=>{
+         if(/\ss="\d+"/.test(match)) return match.replace(/\ss="\d+"/,` s="19"`);
+         return match.replace(/>$/,` s="19">`);
+       });
      }
    }
 
    zip.file("xl/worksheets/sheet1.xml",sheetXml);
-   const out=await zip.generateAsync({type:"uint8array",compression:"DEFLATE",compressionOptions:{level:6}});
+   const out=await zip.generateAsync({type:"uint8array"});
    const blob=new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
    const now=new Date();const pad=n=>String(n).padStart(2,"0");const dateStr=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`London Dock Block G Tracker - Updated ${dateStr}.xlsx`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`London Dock Block G Tracker - Updated ${dateStr}.xlsx`;a.click();URL.revokeObjectURL(a.href);
    show("Excel file downloaded ✓");
- }catch(e){console.error(e);alert("Could not create the Excel file. Please try again while online. "+e.message)}
+ }catch(e){alert("Could not create the Excel file. Try again while online. "+e.message)}
  btn.disabled=false;btn.textContent="Download Excel";
 };
 render();
