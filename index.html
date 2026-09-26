@@ -116,26 +116,18 @@ document.getElementById("export").onclick=async()=>{
  try{
    const bytes=Uint8Array.from(atob(FILE_B64),c=>c.charCodeAt(0));
    const zip=await JSZip.loadAsync(bytes);
-
-   // 1. Add one new cellXf to styles.xml: a clone of the "received" cell style (index 3)
-   //    but with the green fill (fillId 9, already defined in this workbook) instead of white.
-   let stylesXml=await zip.file("xl/styles.xml").async("string");
-   const cellXfsMatch=stylesXml.match(/<cellXfs count="(\d+)">/);
-   const greenStyleIndex=parseInt(cellXfsMatch[1],10);
-   const newXf=`<xf numFmtId="0" fontId="12" fillId="9" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>`;
-   stylesXml=stylesXml.replace(/<cellXfs count="(\d+)">/,(m,c)=>`<cellXfs count="${parseInt(c,10)+1}">`);
-   stylesXml=stylesXml.replace("</cellXfs>",newXf+"</cellXfs>");
-   zip.file("xl/styles.xml",stylesXml);
-
-   // 2. Patch only the specific cells that changed, leaving everything else in
-   //    the sheet (tables, print settings, other formatting) completely untouched.
    let sheetXml=await zip.file("xl/worksheets/sheet1.xml").async("string");
+
+   // IMPORTANT: do not change styles.xml. The original workbook already has
+   // the green appliance style (style 19). Keeping the workbook's styles,
+   // tables and relationships untouched avoids Excel repair errors.
    for(const item of META.plots){
      const s=state[item.plot];if(!s)continue;
      const row=item.row;
+
      for(const n of stageNames){
        const col=META.colmap[n];const addr=colToLetters(col)+row;
-       const cellRe=new RegExp(`<c r="${addr}"[^>]*/>|<c r="${addr}"[^>]*>.*?</c>`);
+       const cellRe=new RegExp(`<c r="${addr}"[^>]*>([\\s\\S]*?)</c>|<c r="${addr}"[^>]*/>`);
        let newCell;
        if(s.dates&&s.dates[n]){
          newCell=`<c r="${addr}" s="6"><v>${dateToSerial(s.dates[n])}</v></c>`;
@@ -144,21 +136,29 @@ document.getElementById("export").onclick=async()=>{
        }
        if(cellRe.test(sheetXml)) sheetXml=sheetXml.replace(cellRe,newCell);
      }
+
      for(const n of applianceNames){
        if(!(s.received&&s.received[n]))continue;
        const col=META.colmap[n];const addr=colToLetters(col)+row;
-       const cellRe=new RegExp(`<c r="${addr}" s="3"`);
-       sheetXml=sheetXml.replace(cellRe,`<c r="${addr}" s="${greenStyleIndex}"`);
+       const cellRe=new RegExp(`<c r="${addr}"[^>]*(?:/>|>[\\s\\S]*?</c>)`);
+       const match=sheetXml.match(cellRe);
+       if(match){
+         const cell=match[0];
+         const greenCell=cell.startsWith(`<c r="${addr}"`)
+           ? cell.replace(new RegExp(`<c r="${addr}"`),`<c r="${addr}" s="19"`)
+           : cell;
+         sheetXml=sheetXml.replace(cellRe,greenCell);
+       }
      }
    }
-   zip.file("xl/worksheets/sheet1.xml",sheetXml);
 
-   const out=await zip.generateAsync({type:"uint8array"});
+   zip.file("xl/worksheets/sheet1.xml",sheetXml);
+   const out=await zip.generateAsync({type:"uint8array",compression:"DEFLATE",compressionOptions:{level:6}});
    const blob=new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
    const now=new Date();const pad=n=>String(n).padStart(2,"0");const dateStr=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`London Dock Block G Tracker - Updated ${dateStr}.xlsx`;a.click();URL.revokeObjectURL(a.href);
-   show("Excel file downloaded");
- }catch(e){alert("Could not create the Excel file. Try again while online. "+e.message)}
+   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`London Dock Block G Tracker - Updated ${dateStr}.xlsx`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+   show("Excel file downloaded ✓");
+ }catch(e){console.error(e);alert("Could not create the Excel file. Please try again while online. "+e.message)}
  btn.disabled=false;btn.textContent="Download Excel";
 };
 render();
