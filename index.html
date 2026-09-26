@@ -144,9 +144,11 @@ document.getElementById("export").onclick=async()=>{
        const match=sheetXml.match(cellRe);
        if(match){
          const cell=match[0];
-         const greenCell=cell.startsWith(`<c r="${addr}"`)
-           ? cell.replace(new RegExp(`<c r="${addr}"`),`<c r="${addr}" s="19"`)
-           : cell;
+         // Replace an existing style attribute instead of adding a second one.
+         // Duplicate XML attributes are invalid and cause Excel's repair dialog.
+         const greenCell=cell
+           .replace(/\s+s="[^"]*"/, "")
+           .replace(new RegExp(`<c r="${addr}"`),`<c r="${addr}" s="19"`);
          sheetXml=sheetXml.replace(cellRe,greenCell);
        }
      }
